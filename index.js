@@ -5,6 +5,8 @@ const SET_AGE_INTENT = "SetAge";
 const SET_MONTHLY_INCOME_INTENT = "SetMonthlyIncome";
 const SET_MONTHLY_DEBT_INTENT = "SetMonthlyDebt";
 const SET_REPAYMENT_PERIOD_INTENT = "SetRepaymentPeriod";
+const CALCULATE_MONTHLY_PAYMENT_FOR_INDICATIVE_LOAN_AMOUNT_INTENT = "CalculateMonthlyPaymentForIndicativeLoanAmount";
+const CALCULATE_MONTHLY_PAYMENT = "CalculateMonthlyPayment";
 const SOMETHING_ELSE_INTENT = "SomethingElse";
 const DEFAULT_FALLBACK_INTENT = "Sorry, I don't know what you mean.";
 
@@ -16,6 +18,7 @@ const AGE_PROPERTY = "age";
 const MONTHLY_INCOME_PROPERTY = "monthlyIncome";
 const MONTHLY_DEBT_PROPERTY = "monthlyDebt";
 const REPAYMENT_PERIOD_PROPERTY = "repaymentPeriod";
+const INDICATIVE_LOAN_AMOUNT_PROPERTY = "indicativeLoanAmount";
 
 const PROPERTY_TYPE_PUBLIC = "public";
 const PROPERTY_TYPE_PRIVATE = "private";
@@ -26,6 +29,11 @@ const MAX_TOTAL_DEBT_SERVICING_RATIO = 0.6;
 const SOMETHING_ELSE_OPTION_CURRENT = "currentOption";
 const SOMETHING_ELSE_OPTION_LOAN_AMOUNT = "loanAmount";
 const SOMETHING_ELSE_OPTION_MONTHLY_PAYMENT = "monthlyPayment";
+
+const YEAR_ONE_INTEREST_RATE = 0.015;
+const YEAR_TWO_INTEREST_RATE = 0.015;
+const YEAR_THREE_INTEREST_RATE = 0.02;
+const THEREAFTER_INTEREST_RATE = 0.025;
 
 exports.loanCalculatorWebhook = (req, res) => {
     console.log("printing queryResult...")
@@ -45,6 +53,8 @@ exports.loanCalculatorWebhook = (req, res) => {
         setMonthlyDebt(res);
     } else if (intent === SET_REPAYMENT_PERIOD_INTENT) {
         setRepaymentPeriod(req, res);
+    } else if (intent === CALCULATE_MONTHLY_PAYMENT_FOR_INDICATIVE_LOAN_AMOUNT_INTENT) {
+        calculateMonthlyPaymentForIndicativeLoanAmount(req, res);
     } else if (intent === SOMETHING_ELSE_INTENT) {
         somethingElse(req, res);
     } else {
@@ -163,19 +173,37 @@ function getMonthlyDebtResponse() {
  */
 
 function setRepaymentPeriod(req, res) {
+    let sessionId = getSessionId(req);
     let contexts = getContexts(req);
     let parameters = getCalculateLoanParameters(req, contexts);
 
-    let response = getRepaymentPeriodResponse(parameters);
+    let response = getRepaymentPeriodResponse(sessionId, parameters);
     res.setHeader('Content-Type', 'application/json');
     res.send(JSON.stringify(response));
 }
 
-function getRepaymentPeriodResponse(parameters) {
+function getRepaymentPeriodResponse(sessionId, parameters) {
     let indicativeLoanAmount = getIndicativeLoanAmount(parameters);
+    let newParameters = getNewParameters(parameters, indicativeLoanAmount);
+    let outputContexts = getRepaymentPeriodOutputContexts(sessionId, newParameters);
     return {
         "fulfillmentText": "Your indicative loan amount is " + indicativeLoanAmount + ". Would you like to know your monthly payment? Or something else?",
+        outputContexts,
     };
+}
+
+function getNewParameters(parameters, indicativeLoanAmount) {
+    let newParameters = parameters;
+    newParameters[AGE_PROPERTY] = { 
+        "amount": parameters[AGE_PROPERTY],
+        "unit": "year",
+    };
+    newParameters[REPAYMENT_PERIOD_PROPERTY] = {
+        "amount": parameters[REPAYMENT_PERIOD_PROPERTY],
+        "unit": "year",
+    }
+    newParameters[INDICATIVE_LOAN_AMOUNT_PROPERTY] = indicativeLoanAmount;
+    return newParameters;
 }
 
 function getIndicativeLoanAmount(parameters) {
@@ -197,9 +225,52 @@ function getMonthlyNetIncome(parameters) {
     return monthlyNetIncome;
 }
 
+function getRepaymentPeriodOutputContexts(sessionId, parameters) {
+    repaymentPeriodOutputContext = getRepaymentPeriodOutputContext(sessionId, 5, parameters);
+    return [repaymentPeriodOutputContext];
+}
+
+function getRepaymentPeriodOutputContext(sessionId, lifespanCount, parameters) {
+    return {
+        "name": "projects/ocbchomeloan-5344d/agent/sessions/" + sessionId + "/contexts/" + CALCULATE_LOAN_CONTEXT,
+        lifespanCount,
+        parameters,
+    };
+}
+
 /*
  *
- * Get Calculate Loan Parameters
+ * Calculate Monthly Payment For Indicative Loan Amount
+ *
+ */
+
+function calculateMonthlyPaymentForIndicativeLoanAmount(req, res) {
+    let contexts = getContexts(req);
+    let parameters = getCalculateLoanParameters(req, contexts);
+
+    let response = getMonthlyPaymentForIndicativeLoanAmountResponse(parameters);
+    res.setHeader('Content-Type', 'application/json');
+    res.send(JSON.stringify(response));
+}
+
+function getMonthlyPaymentForIndicativeLoanAmountResponse(parameters) {
+    let monthlyPayment = getMonthlyPaymentForIndicativeLoanAmount(parameters);
+    return {
+        "fulfillmentText": "Your monthly payment is " + monthlyPayment,
+    };
+}
+
+function getMonthlyPaymentForIndicativeLoanAmount(parameters) {
+    // NOTE: payment formula - https://money.stackexchange.com/questions/61639/what-is-the-formula-for-the-monthly-payment-on-an-adjustable-rate-mortgage
+    let L = parameters.indicativeLoanAmount; // loan amount
+    let c = YEAR_ONE_INTEREST_RATE / 12; // monthly interest rate
+    let n = parameters.repaymentPeriod * 12; // repayment period in months
+    return Math.ceil(L * c * Math.pow(1 + c, n) / (Math.pow(1 + c, n) - 1)); // monthly payment
+}
+
+/*
+ *
+ * Get Parameters
  *
  */
 
@@ -209,12 +280,14 @@ function getCalculateLoanParameters(req, contexts) {
     let monthlyIncome = getMonthlyIncome(req, contexts);
     let monthlyDebt = getMonthlyDebt(req, contexts);
     let repaymentPeriod = getRepaymentPeriod(req, contexts);
+    let indicativeLoanAmount = getIndicativeLoanAmountFromInputContext(req, contexts);
     return {
-        "propertyType": propertyType,
-        "age": age,
-        "monthlyIncome": monthlyIncome,
-        "monthlyDebt": monthlyDebt,
-        "repaymentPeriod": repaymentPeriod,
+        propertyType,
+        age,
+        monthlyIncome,
+        monthlyDebt,
+        repaymentPeriod,
+        indicativeLoanAmount,
     };
 }
 
@@ -276,6 +349,16 @@ function getRepaymentPeriod(req, contexts) {
     return repaymentPeriod;
 }
 
+function getIndicativeLoanAmountFromInputContext(req, contexts) {
+    let indicativeLoanAmount = "";
+    if (req.body.queryResult.parameters[INDICATIVE_LOAN_AMOUNT_PROPERTY]) {
+        indicativeLoanAmount = req.body.queryResult.parameters[INDICATIVE_LOAN_AMOUNT_PROPERTY];
+    } else {
+        indicativeLoanAmount = getParameterFromContexts(contexts, CALCULATE_LOAN_CONTEXT, INDICATIVE_LOAN_AMOUNT_PROPERTY);
+    }
+    return indicativeLoanAmount;
+}
+
 /*
  *
  * Something Else
@@ -309,11 +392,11 @@ function getSomethingElseFulfillmentText(currentOption) {
     let fulfillmentText = "";
     if (currentOption === "") {
         // NOTE: first instance of something else intent
-        fulfillmentText = "Do you want to know the monthly payment for a loan amount? Or something else?";
+        fulfillmentText = "Would you like to know the monthly payment for a loan amount? Or something else?";
     } else if (currentOption === SOMETHING_ELSE_OPTION_MONTHLY_PAYMENT) {
-        fulfillmentText = "Do you want to know how much you can borrow? Or something else?";
+        fulfillmentText = "Would you like to know how much you can borrow? Or something else?";
     } else if (currentOption === SOMETHING_ELSE_OPTION_LOAN_AMOUNT) {
-        fulfillmentText = "Do you want to know the monthly payment for a loan amount? Or something else?";
+        fulfillmentText = "Would you like to know the monthly payment for a loan amount? Or something else?";
     }
     return fulfillmentText;
 }
