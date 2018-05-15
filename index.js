@@ -5,9 +5,11 @@ const SET_AGE_INTENT = "SetAge";
 const SET_MONTHLY_INCOME_INTENT = "SetMonthlyIncome";
 const SET_MONTHLY_DEBT_INTENT = "SetMonthlyDebt";
 const SET_REPAYMENT_PERIOD_INTENT = "SetRepaymentPeriod";
+const SOMETHING_ELSE_INTENT = "SomethingElse";
 const DEFAULT_FALLBACK_INTENT = "Sorry, I don't know what you mean.";
 
 const CALCULATE_LOAN_CONTEXT = "calculateloan";
+const SOMETHING_ELSE_CONTEXT = "somethingelse";
 
 const PROPERTY_TYPE_PROPERTY = "propertyType";
 const AGE_PROPERTY = "age";
@@ -21,18 +23,15 @@ const PROPERTY_TYPE_PRIVATE = "private";
 const MAX_MORTGAGECOMPARISON_SERVICING_RATIO = 0.3; 
 const MAX_TOTAL_DEBT_SERVICING_RATIO = 0.6;
 
+const SOMETHING_ELSE_OPTION_CURRENT = "currentOption";
+const SOMETHING_ELSE_OPTION_LOAN_AMOUNT = "loanAmount";
+const SOMETHING_ELSE_OPTION_MONTHLY_PAYMENT = "monthlyPayment";
+
 exports.loanCalculatorWebhook = (req, res) => {
     console.log("printing queryResult...")
     console.log(req.body.queryResult);
 
     let intent = getIntent(req);
-    let contexts = getContexts(req);
-    console.log("printing contexts...");
-    console.log(contexts);
-
-    let parameters = getParameters(req, contexts);
-    console.log("printing parameters...");
-    console.log(parameters);
     
     if (intent === CALCULATE_LOAN_INTENT) {
         calculateLoan(res);
@@ -45,7 +44,9 @@ exports.loanCalculatorWebhook = (req, res) => {
     } else if (intent === SET_MONTHLY_DEBT_INTENT) {
         setMonthlyDebt(res);
     } else if (intent === SET_REPAYMENT_PERIOD_INTENT) {
-        setRepaymentPeriod(res, parameters);
+        setRepaymentPeriod(req, res);
+    } else if (intent === SOMETHING_ELSE_INTENT) {
+        somethingElse(req, res);
     } else {
         res.setHeader('Content-Type', 'application/json');
         res.send(JSON.stringify({ 'fulfillmentText': DEFAULT_FALLBACK_INTENT }));
@@ -61,83 +62,8 @@ function getContexts(req) {
     return req.body.queryResult.outputContexts;
 }
 
-/*
- *
- * Get Parameters
- *
- */
-
-function getParameters(req, contexts) {
-    let propertyType = getPropertyType(req, contexts);
-    let age = getAge(req, contexts);
-    let monthlyIncome = getMonthlyIncome(req, contexts);
-    let monthlyDebt = getMonthlyDebt(req, contexts);
-    let repaymentPeriod = getRepaymentPeriod(req, contexts);
-    return {
-        "propertyType": propertyType,
-        "age": age,
-        "monthlyIncome": monthlyIncome,
-        "monthlyDebt": monthlyDebt,
-        "repaymentPeriod": repaymentPeriod,
-    };
-}
-
-function getPropertyType(req, contexts) {
-    let propertyType = "";
-    if (req.body.queryResult.parameters[PROPERTY_TYPE_PROPERTY]) {
-        propertyType = req.body.queryResult.parameters[PROPERTY_TYPE_PROPERTY];
-    } else {
-        propertyType = getParameterFromContexts(contexts, PROPERTY_TYPE_PROPERTY);
-    }
-    return propertyType;
-}
-
-function getAge(req, contexts) {
-    let age = "";
-    if (req.body.queryResult.parameters[AGE_PROPERTY]) {
-        age = req.body.queryResult.parameters[AGE_PROPERTY].amount;
-    } else {
-        tempAge = getParameterFromContexts(contexts, AGE_PROPERTY);
-        // return value might be empty string
-        if (tempAge.amount) {
-            age = tempAge.amount;
-        }
-    } 
-    return age;
-}
-
-function getMonthlyIncome(req, contexts) {
-    let monthlyIncome = "";
-    if (req.body.queryResult.parameters[MONTHLY_INCOME_PROPERTY]) {
-        monthlyIncome = req.body.queryResult.parameters[MONTHLY_INCOME_PROPERTY];
-    } else {
-        monthlyIncome = getParameterFromContexts(contexts, MONTHLY_INCOME_PROPERTY);
-    } 
-    return monthlyIncome;
-}
-
-function getMonthlyDebt(req, contexts) {
-    let monthlyDebt = "";
-    if (req.body.queryResult.parameters[MONTHLY_DEBT_PROPERTY]) {
-        monthlyDebt = req.body.queryResult.parameters[MONTHLY_DEBT_PROPERTY];
-    } else {
-        monthlyDebt = getParameterFromContexts(contexts, MONTHLY_DEBT_PROPERTY);
-    } 
-    return monthlyDebt;
-}
-
-function getRepaymentPeriod(req, contexts) {
-    let repaymentPeriod = "";
-    if (req.body.queryResult.parameters[REPAYMENT_PERIOD_PROPERTY]) {
-        repaymentPeriod = req.body.queryResult.parameters[REPAYMENT_PERIOD_PROPERTY].amount;
-    } else {
-        tempRepaymentPeriod = getParameterFromContexts(contexts, REPAYMENT_PERIOD_PROPERTY);
-        // return value might be empty string
-        if (tempRepaymentPeriod.amount) {
-            repaymentPeriod = tempRepaymentPeriod.amount;
-        }
-    } 
-    return repaymentPeriod;
+function getSessionId(req) {
+    return req.body.session.split("/").pop();
 }
 
 /*
@@ -236,7 +162,10 @@ function getMonthlyDebtResponse() {
  *
  */
 
-function setRepaymentPeriod(res, parameters) {
+function setRepaymentPeriod(req, res) {
+    let contexts = getContexts(req);
+    let parameters = getCalculateLoanParameters(req, contexts);
+
     let response = getRepaymentPeriodResponse(parameters);
     res.setHeader('Content-Type', 'application/json');
     res.send(JSON.stringify(response));
@@ -244,9 +173,8 @@ function setRepaymentPeriod(res, parameters) {
 
 function getRepaymentPeriodResponse(parameters) {
     let indicativeLoanAmount = getIndicativeLoanAmount(parameters);
-    console.log("printing indicativeLoanAmount..." + indicativeLoanAmount);
     return {
-        "fulfillmentText": "Your indicative loan amount is " + indicativeLoanAmount,
+        "fulfillmentText": "Your indicative loan amount is " + indicativeLoanAmount + ". Would you like to know your monthly payment? Or something else?",
     };
 }
 
@@ -271,22 +199,172 @@ function getMonthlyNetIncome(parameters) {
 
 /*
  *
+ * Get Calculate Loan Parameters
+ *
+ */
+
+function getCalculateLoanParameters(req, contexts) {
+    let propertyType = getPropertyType(req, contexts);
+    let age = getAge(req, contexts);
+    let monthlyIncome = getMonthlyIncome(req, contexts);
+    let monthlyDebt = getMonthlyDebt(req, contexts);
+    let repaymentPeriod = getRepaymentPeriod(req, contexts);
+    return {
+        "propertyType": propertyType,
+        "age": age,
+        "monthlyIncome": monthlyIncome,
+        "monthlyDebt": monthlyDebt,
+        "repaymentPeriod": repaymentPeriod,
+    };
+}
+
+function getPropertyType(req, contexts) {
+    let propertyType = "";
+    if (req.body.queryResult.parameters[PROPERTY_TYPE_PROPERTY]) {
+        propertyType = req.body.queryResult.parameters[PROPERTY_TYPE_PROPERTY];
+    } else {
+        propertyType = getParameterFromContexts(contexts, CALCULATE_LOAN_CONTEXT, PROPERTY_TYPE_PROPERTY);
+    }
+    return propertyType;
+}
+
+function getAge(req, contexts) {
+    let age = "";
+    if (req.body.queryResult.parameters[AGE_PROPERTY]) {
+        age = req.body.queryResult.parameters[AGE_PROPERTY].amount;
+    } else {
+        tempAge = getParameterFromContexts(contexts, CALCULATE_LOAN_CONTEXT, AGE_PROPERTY);
+        // NOTE: return value might be empty string
+        if (tempAge.amount) {
+            age = tempAge.amount;
+        }
+    } 
+    return age;
+}
+
+function getMonthlyIncome(req, contexts) {
+    let monthlyIncome = "";
+    if (req.body.queryResult.parameters[MONTHLY_INCOME_PROPERTY]) {
+        monthlyIncome = req.body.queryResult.parameters[MONTHLY_INCOME_PROPERTY];
+    } else {
+        monthlyIncome = getParameterFromContexts(contexts, CALCULATE_LOAN_CONTEXT, MONTHLY_INCOME_PROPERTY);
+    } 
+    return monthlyIncome;
+}
+
+function getMonthlyDebt(req, contexts) {
+    let monthlyDebt = "";
+    if (req.body.queryResult.parameters[MONTHLY_DEBT_PROPERTY]) {
+        monthlyDebt = req.body.queryResult.parameters[MONTHLY_DEBT_PROPERTY];
+    } else {
+        monthlyDebt = getParameterFromContexts(contexts, CALCULATE_LOAN_CONTEXT, MONTHLY_DEBT_PROPERTY);
+    } 
+    return monthlyDebt;
+}
+
+function getRepaymentPeriod(req, contexts) {
+    let repaymentPeriod = "";
+    if (req.body.queryResult.parameters[REPAYMENT_PERIOD_PROPERTY]) {
+        repaymentPeriod = req.body.queryResult.parameters[REPAYMENT_PERIOD_PROPERTY].amount;
+    } else {
+        tempRepaymentPeriod = getParameterFromContexts(contexts, CALCULATE_LOAN_CONTEXT, REPAYMENT_PERIOD_PROPERTY);
+        // NOTE: return value might be empty string
+        if (tempRepaymentPeriod.amount) {
+            repaymentPeriod = tempRepaymentPeriod.amount;
+        }
+    } 
+    return repaymentPeriod;
+}
+
+/*
+ *
+ * Something Else
+ *
+ */
+
+function somethingElse(req, res) {
+    let sessionId = getSessionId(req);
+    let contexts = getContexts(req);
+    let currentOption = getCurrentOption(req, contexts);
+
+    let response = getSomethingElseResponse(sessionId, currentOption);
+    res.setHeader('Content-Type', 'application/json');
+    res.send(JSON.stringify(response));
+}
+
+function getCurrentOption(req, contexts) {
+    return getParameterFromContexts(contexts, SOMETHING_ELSE_CONTEXT, SOMETHING_ELSE_OPTION_CURRENT);
+}
+
+function getSomethingElseResponse(sessionId, currentOption) {
+    let fulfillmentText = getSomethingElseFulfillmentText(currentOption);
+    let outputContexts = getSomethingElseOutputContexts(sessionId, currentOption);
+    return {
+        fulfillmentText,
+        outputContexts,
+    };
+}
+
+function getSomethingElseFulfillmentText(currentOption) {
+    let fulfillmentText = "";
+    if (currentOption === "") {
+        // NOTE: first instance of something else intent
+        fulfillmentText = "Do you want to know the monthly payment for a loan amount? Or something else?";
+    } else if (currentOption === SOMETHING_ELSE_OPTION_MONTHLY_PAYMENT) {
+        fulfillmentText = "Do you want to know how much you can borrow? Or something else?";
+    } else if (currentOption === SOMETHING_ELSE_OPTION_LOAN_AMOUNT) {
+        fulfillmentText = "Do you want to know the monthly payment for a loan amount? Or something else?";
+    }
+    return fulfillmentText;
+}
+
+function getSomethingElseOutputContexts(sessionId, currentOption) {
+    let somethingElseOutputContext = getSomethingElseOutputContext(sessionId, 5, currentOption);
+    return [somethingElseOutputContext];
+}
+
+function getSomethingElseOutputContext(sessionId, lifespanCount, currentOption) {
+    let newCurrentOption = getNewCurrentOption(currentOption);
+    return {
+        "name": "projects/ocbchomeloan-5344d/agent/sessions/" + sessionId + "/contexts/" + SOMETHING_ELSE_CONTEXT,
+        lifespanCount,
+        "parameters": {
+            "currentOption": newCurrentOption,
+        }
+    };
+}
+
+function getNewCurrentOption(currentOption) {
+    let newCurrentOption = "";
+    if (currentOption === "") {
+        // NOTE: first instance of something else intent
+        newCurrentOption = SOMETHING_ELSE_OPTION_MONTHLY_PAYMENT;
+    } else if (currentOption === SOMETHING_ELSE_OPTION_MONTHLY_PAYMENT) {
+        newCurrentOption = SOMETHING_ELSE_OPTION_LOAN_AMOUNT;
+    } else if (currentOption === SOMETHING_ELSE_OPTION_LOAN_AMOUNT) {
+        newCurrentOption = SOMETHING_ELSE_OPTION_MONTHLY_PAYMENT;
+    }
+    return newCurrentOption;
+}
+
+/*
+ *
  * Utility Methods
  *
  */
 
-function getParameterFromContexts(contexts, parameterName) {
+function getParameterFromContexts(contexts, contextName, parameterName) {
     let parameter = "";
-    let calculateLoanInputContext = getCalculateLoanInputContext(contexts);
-    if (calculateLoanInputContext.parameters && calculateLoanInputContext.parameters[parameterName]) {
-        parameter = calculateLoanInputContext.parameters[parameterName];
+    let inputContext = getInputContext(contexts, contextName);
+    if (inputContext && inputContext.parameters && inputContext.parameters[parameterName]) {
+        parameter = inputContext.parameters[parameterName];
     }
     return parameter;
 }
 
-function getCalculateLoanInputContext(contexts) {
+function getInputContext(contexts, contextName) {
     return contexts.filter(context => {
-        return getContextName(context) === CALCULATE_LOAN_CONTEXT;
+        return getContextName(context) === contextName;
     })[0];
 }
 
