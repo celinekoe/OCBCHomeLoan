@@ -1,17 +1,21 @@
-
 const CALCULATE_LOAN_INTENT = "CalculateLoan";
 const SET_PROPERTY_TYPE_INTENT = "SetPropertyType";
 const SET_AGE_INTENT = "SetAge";
 const SET_MONTHLY_INCOME_INTENT = "SetMonthlyIncome";
 const SET_MONTHLY_DEBT_INTENT = "SetMonthlyDebt";
 const SET_REPAYMENT_PERIOD_FOR_CALCULATE_LOAN_INTENT = "SetRepaymentPeriodForCalculateLoan";
-const CALCULATE_MONTHLY_PAYMENT = "CalculateMonthlyPayment";
+
+const CALCULATE_MONTHLY_PAYMENT_INTENT = "CalculateMonthlyPayment";
 const SET_REPAYMENT_PERIOD_FOR_CALCULATE_MONTHLY_PAYMENT_INTENT = "SetRepaymentPeriodForCalculateMonthlyPayment";
 const SET_LOAN_AMOUNT_FOR_CALCULATE_MONTHLY_PAYMENT_INTENT = "SetLoanAmountForCalculateMonthlyPayment";
+
+const CALL_INTENT = "Call";
+const SET_PHONE_NUMBER_INTENT = "SetPhoneNumber";
 
 const SOMETHING_ELSE_FOR_WELCOME_INTENT = "SomethingElseForWelcome";
 const SOMETHING_ELSE_FOR_CALCULATE_LOAN_INTENT = "SomethingElseForCalculateLoan";
 const SOMETHING_ELSE_FOR_CALCULATE_MONTHLY_PAYMENT_INTENT = "SomethingElseForCalculateMonthlyPayment";
+const SOMETHING_ELSE_FOR_CALL = "SomethingElseForCall";
 const SOMETHING_ELSE_INTENT = "SomethingElse";
 const DEFAULT_FALLBACK_INTENT = "Sorry, I don't know what you mean.";
 
@@ -19,6 +23,7 @@ const CALCULATE_LOAN_CONTEXT = "calculateloan";
 const SET_MONTHLY_DEBT_CONTEXT = "setmonthlydebt";
 const SET_REPAYMENT_PERIOD_FOR_CALCULATE_LOAN_CONTEXT = "setrepaymentperiodforcalculateloan";
 const CALCULATE_MONTHLY_PAYMENT_CONTEXT = "calculatemonthlypayment";
+const CALL_CONTEXT = "call";
 const SOMETHING_ELSE_CONTEXT = "somethingelse";
 
 const PROPERTY_TYPE_PROPERTY = "propertyType";
@@ -27,6 +32,7 @@ const MONTHLY_INCOME_PROPERTY = "monthlyIncome";
 const MONTHLY_DEBT_PROPERTY = "monthlyDebt";
 const REPAYMENT_PERIOD_PROPERTY = "repaymentPeriod";
 const LOAN_AMOUNT_PROPERTY = "loanAmount";
+const PHONE_NUMBER_PROPERTY = "phoneNumber";
 
 const PROPERTY_TYPE_PUBLIC = "public";
 const PROPERTY_TYPE_PRIVATE = "private";
@@ -57,6 +63,10 @@ const TWO_PERCENT_INTEREST_RATE = 0.02;
 const TWO_POINT_FIVE_PERCENT = "two point five percent";
 const TWO_POINT_FIVE_PERCENT_INTEREST_RATE = 0.025;
 
+const CTA_TEXT = "Would you like us to call you for clarifications?";
+const SOMETHING_ELSE_TEXT = "Would you like to know something else?";
+const SOMETHING_ELSE_SHORT_TEXT = "Or something else?";
+
 exports.loanCalculatorWebhook = (req, res) => {
     console.log("printing queryResult...")
     console.log(req.body.queryResult);
@@ -75,15 +85,19 @@ exports.loanCalculatorWebhook = (req, res) => {
         setMonthlyDebt(res);
     } else if (intent === SET_REPAYMENT_PERIOD_FOR_CALCULATE_LOAN_INTENT) {
         setRepaymentPeriodForCalculateLoan(req, res);
-    } else if (intent === CALCULATE_MONTHLY_PAYMENT) {
+    } else if (intent === CALCULATE_MONTHLY_PAYMENT_INTENT) {
         calculateMonthlyPayment(res);
     } else if (intent === SET_REPAYMENT_PERIOD_FOR_CALCULATE_MONTHLY_PAYMENT_INTENT) {
         setRepaymentPeriodForCalculateMonthlyPayment(res);
     } else if (intent === SET_LOAN_AMOUNT_FOR_CALCULATE_MONTHLY_PAYMENT_INTENT) {
         setLoanAmountForCalculateMonthlyPayment(req, res);
+    } else if (intent === CALL_INTENT) {
+        call(res);
+    } else if (intent === SET_PHONE_NUMBER_INTENT) {
+        setPhoneNumber(req, res);
     } else if (intent === SOMETHING_ELSE_FOR_WELCOME_INTENT) {
         somethingElseForCalculateLoan(req, res);
-    } else if (intent === SOMETHING_ELSE_FOR_CALCULATE_LOAN_INTENT) {
+    } else if (intent === SOMETHING_ELSE_FOR_CALCULATE_LOAN_INTENT || intent === SOMETHING_ELSE_FOR_CALL) {
         somethingElseForCalculateLoanVariant(req, res);
     } else if (intent === SOMETHING_ELSE_FOR_CALCULATE_MONTHLY_PAYMENT_INTENT) {
         somethingElseForCalculateMonthlyPayment(req, res);
@@ -245,7 +259,7 @@ function getRepaymentPeriodForCalculateLoanFulfillmentText(parameters) {
         "For the " + YEAR_TWO + ", it will be " +  monthlyPaymentAtOnePointFivePercent + " at " + ONE_POINT_FIVE_PERCENT + ". " +
         "For the " + YEAR_THREE + ", it will be " +  monthlyPaymentAtTwoPercent + " at " + TWO_PERCENT + ". " +
         THEREAFTER + ",  it will be " + monthlyPaymentAtTwoPointFivePercent + " at " + TWO_POINT_FIVE_PERCENT + ". " +
-        "Would you like to know something else?";
+        CTA_TEXT + " " + SOMETHING_ELSE_SHORT_TEXT;
 }
 
 function getIndicativeLoanAmount(parameters) {
@@ -350,6 +364,59 @@ function getMonthlyPaymentFulfilmentText(parameters) {
         monthlyPaymentAtTwoPercent + " at " + TWO_PERCENT + ", and " +
         monthlyPaymentAtTwoPointFivePercent + " at " + TWO_POINT_FIVE_PERCENT + ". " +
         "Would you like to know something else?";
+}
+
+/*
+ *
+ * Call
+ *
+ */
+
+function call(res) {
+    let response = getCallResponse();
+    res.setHeader('Content-Type', 'application/json');
+    res.send(JSON.stringify(response));
+}
+
+function getCallResponse() {
+    let fulfillmentText = getCallFulfillmentText();
+    return {
+        fulfillmentText,
+    };
+}
+
+function getCallFulfillmentText() {
+    return "What is your phone number? You can also say back to go back.";
+}
+
+/*
+ *
+ * Set Phone Number
+ *
+ */
+
+function setPhoneNumber(req, res) {
+    let contexts = getContexts(req);
+    let parameters = getCallParameters(req, contexts);
+    console.log("printing parameters...");
+    console.log(parameters);
+
+    let response = getPhoneNumberResponse(parameters);
+    res.setHeader('Content-Type', 'application/json');
+    res.send(JSON.stringify(response));
+}
+
+function getPhoneNumberResponse(parameters) {
+    let fulfillmentText = getPhoneNumberFulfillmentText(parameters);
+    return {
+        fulfillmentText,
+    };
+}
+
+function getPhoneNumberFulfillmentText(parameters) {
+    return "Thank you! Your phone number of " + parameters[PHONE_NUMBER_PROPERTY] + 
+        " has been sent to our customer service agent. You will be contacted by them shortly. " +
+        SOMETHING_ELSE_TEXT;
 }
 
 /*
@@ -551,6 +618,13 @@ function getMonthlyPaymentParameters(req, contexts) {
     };
 }
 
+function getCallParameters(req, contexts) {
+    let phoneNumber = getPhoneNumber(req, contexts);
+    return {
+        phoneNumber,
+    };
+}
+
 function getRepaymentPeriodForCalculateMonthlyPayment(req, contexts) {
     let repaymentPeriod = "";
     if (req.body.queryResult.parameters[REPAYMENT_PERIOD_PROPERTY]) {
@@ -573,6 +647,16 @@ function getLoanAmountCalculateMonthlyPayment(req, contexts) {
         loanAmount = getParameterFromContexts(contexts, CALCULATE_MONTHLY_PAYMENT_CONTEXT, LOAN_AMOUNT_PROPERTY);
     }
     return loanAmount;
+}
+
+function getPhoneNumber(req, contexts) {
+    let phoneNumber = "";
+    if (req.body.queryResult.parameters[PHONE_NUMBER_PROPERTY]) {
+        phoneNumber = req.body.queryResult.parameters[PHONE_NUMBER_PROPERTY];
+    } else {
+        phoneNumber = getParameterFromContexts(contexts, CALL_CONTEXT, PHONE_NUMBER_PROPERTY);
+    }
+    return phoneNumber;
 }
 
 /*
